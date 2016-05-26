@@ -1,0 +1,11 @@
+<svg
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 100 100"
+>
+  <path
+    stroke="#000"
+    fill="none"
+    stroke-width="5"
+    d="M50,0 L50,100 M50,50 L100,50"
+  />
+</svg>
