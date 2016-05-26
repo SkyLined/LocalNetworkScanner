@@ -20,7 +20,7 @@ function fXHRScanIPAddressPorts(sIPAddress, auPortNumbers, fCallback) {
           fLoop();
         };
       };
-      oXHR.open("GET", "http://" + sIPAddress + ":" + uPortNumber);
+      oXHR.open("GET", location.protocol + "//" + sIPAddress + ":" + uPortNumber);
       oXHR.send();
     } else {
       console.log("IP: " + sIPAddress + ", ports: " + (auDetectedPorts.join(", ") || "none"));
