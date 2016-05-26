@@ -37,7 +37,7 @@
             } else {
               var aoNetworkTreeNodes = [];
               asIPAddresses.forEach(function (sIPAddress, uIndex) {
-                var oNetworkTreeNode = new cTreeNode("Network for " + sIPAddress + "/8:", "network.svg");
+                var oNetworkTreeNode = new cTreeNode("Network for " + sIPAddress + "/24:", "network.svg");
                 document.body.appendChild(oNetworkTreeNode.oRootElement);
                 aoNetworkTreeNodes[uIndex] = oNetworkTreeNode;
               });
@@ -53,28 +53,25 @@
                 oNetworkTreeNode.setIcon("scanning.svg");
                 var asIPAddressComponents = /((?:[0-9]{1,3}\.){3})([0-9]{1,3})/.exec(sOwnIPAddress),
                     sFirstBytes = asIPAddressComponents[1],
-                    sLastByte = asIPAddressComponents[2],
-                    aoMachineTreeNodes = [];
-                for (var uLastByte = 0; uLastByte < 256; uLastByte++) {
-                  var sIPAddress = sFirstBytes + uLastByte,
-                      oTreeNode = sIPAddress == sOwnIPAddress ? new cTreeNode(sIPAddress + " (you)", "machine.svg") : new cTreeNode("");
-                  aoMachineTreeNodes[uLastByte] = oNetworkTreeNode.appendChild(oTreeNode);
-                };
+                    sLastByte = asIPAddressComponents[2];
                 uLastByte = -1;
                 function fScanAddressRange() {
                   if (++uLastByte < 256) {
-                    if (sFirstBytes + uLastByte == sOwnIPAddress) {
+                    var sIPAddress = sFirstBytes + uLastByte;
+                    if (sIPAddress == sOwnIPAddress) {
+                      oTreeNode = oNetworkTreeNode.appendChild(new cTreeNode(sIPAddress + " (you)", "machine.svg"));
                       fScanAddressRange();
                     } else {
-                      fScanIPAddress(sFirstBytes + uLastByte, aoMachineTreeNodes[uLastByte], fScanAddressRange);
+                      oTreeNode = oNetworkTreeNode.appendChild(new cTreeNode(sIPAddress, "scanning.svg"));
+                      fScanIPAddress(sFirstBytes + uLastByte, oTreeNode, fScanAddressRange);
                     };
                   } else {
                     oNetworkTreeNode.setIcon("network.svg");
                     fCallback();
                   };
                 }
-                for (var uThreads = 64; uThreads--;) {
-                  fScanAddressRange();
+                for (var uThreads = 16; uThreads--;) {
+                  setTimeout(fScanAddressRange);
                 };
               };
             };
@@ -88,37 +85,16 @@
       function fScanIPAddress(sIPAddress, oMachineTreeNode, fCallback) {
         oMachineTreeNode.setName(sIPAddress);
         oMachineTreeNode.setIcon("scanning.svg");
-        var dsDescription_by_sPortNumber = {
-              "80":     "HTTP server",
-              "443":    "HTTPS server",
-              "445":    "SMB shares (Microsoft-DS)",
-              "3389":   "RDP (Microsoft Terminal Server)",
-              "28876":  "SkyLined",
-              "31337":  "leet",
-            },
-            auPortNumbers = Object.keys(dsDescription_by_sPortNumber).map(function (sPortNumber) { return parseInt(sPortNumber); });
-        fXHRScanIPAddressPorts(sIPAddress, auPortNumbers, function(auDetectedPortNumbers) {
-          console.warn(auDetectedPortNumbers.length + "==" + Object.keys(dsDescription_by_sPortNumber).length);
-          if (auDetectedPortNumbers.length == 0) {
-            oMachineTreeNode.remove();
-          } else if (auDetectedPortNumbers.length == Object.keys(dsDescription_by_sPortNumber).length) {
+        fXHRScanIPAddressPorts(sIPAddress, [2, 3, 4, 5, 445], function(auDetectedPortNumbers) {
+          if (auDetectedPortNumbers.length >= 3) {
+            // *nix systems appear to have every port detected.
             oMachineTreeNode.setIcon("nix.svg");
-            oMachineTreeNode.appendChild(new cTreeNode("Ports cannot be scanned for *nix machines", "error.svg"));
+          } else if (auDetectedPortNumbers.length == 1 && auDetectedPortNumbers[0] == 445) {
+            oMachineTreeNode.setIcon("windows.svg");
+          } else if (auDetectedPortNumbers.length != 0) {
+            oMachineTreeNode.setIcon("unknown.svg");
           } else {
-            if (auDetectedPortNumbers.includes(28876) || auDetectedPortNumbers.includes(31337)) {
-              oMachineTreeNode.setIcon("unknown.svg");
-              oMachineTreeNode.appendChild(new cTreeNode("Port scan may contain false positives", "unknown.svg"));
-            } else if (auDetectedPortNumbers.includes(445) || auDetectedPortNumbers.includes(3389)) {
-              oMachineTreeNode.setIcon("windows.svg");
-            } else {
-              oMachineTreeNode.setIcon("unknown.svg");
-            };
-            auDetectedPortNumbers.forEach(function(uPortNumber) {
-              if (uPortNumber != 28876 && uPortNumber != 31337) {
-                var sDescription = dsDescription_by_sPortNumber[uPortNumber];
-                oMachineTreeNode.appendChild(new cTreeNode("port " + uPortNumber + " " + sDescription));
-              };
-            });
+            oMachineTreeNode.remove();
           };
           fCallback();
         });

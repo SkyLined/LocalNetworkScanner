@@ -11,7 +11,7 @@ function fXHRScanIPAddressPorts(sIPAddress, auPortNumbers, fCallback) {
               oXHR.abort();
               fLoop();
             };
-          }, 2000);
+          }, 1500);
       oXHR.onreadystatechange = function fXHRReadyStateChangeEventHandler(oEvent) {
         if (oXHR.readyState == 4 && !bFinished) {
           bFinished = true;
