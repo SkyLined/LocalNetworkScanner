@@ -27,76 +27,163 @@
     </style>
     <script src="fGetIPAddresses.js"></script>
     <script src="fXHRScanIPAddressPorts.js"></script>
+    <script src="fxIPAddress.js"></script>
     <script>
-      onload = function() {
+      onload = function fWindow_load_EventHandler() {
+        var uStartTime = new Date().valueOf();
+        function fsGetTime() {
+          var uTimeSeconds = Math.round((new Date().valueOf() - uStartTime) / 1000),
+              uTimeMinutes = Math.floor(uTimeSeconds / 60) % 60,
+              uTimeHours = Math.floor(uTimeSeconds / 60 / 60);
+          return (
+            (uTimeHours ? uTimeHours + " hours, " : "") +
+            (uTimeMinutes ? uTimeMinutes + " minutes, " : "") +
+            (uTimeSeconds % 60) + " seconds"
+          );
+        };
+        var oInterval = setInterval(function () {
+          document.title = "Scanning (" + fsGetTime() + ")...";
+        }, 1000);
         fGetIPAddresses(
           oIFrame,
           function fGetIPAddressSuccessCallback(asIPAddresses) {
             if (asIPAddresses.length == 0) {
               document.body.appendChild(new cTreeNode("Your local IP address could not be determined.", "error.svg").oRootElement);
-            } else {
-              var aoNetworkTreeNodes = [];
-              asIPAddresses.forEach(function (sIPAddress, uIndex) {
-                var oNetworkTreeNode = new cTreeNode("Network for " + sIPAddress + "/24:", "network.svg");
-                document.body.appendChild(oNetworkTreeNode.oRootElement);
-                aoNetworkTreeNodes[uIndex] = oNetworkTreeNode;
-              });
-              var uIndex = -1;
-              function fScanNetworks() {
-                if (++uIndex < asIPAddresses.length) {
-                  fScanNetworkForIPAddress(asIPAddresses[uIndex], aoNetworkTreeNodes[uIndex], fScanNetworks);
-                };
-              };
-              fScanNetworks();
-              
-              function fScanNetworkForIPAddress(sOwnIPAddress, oNetworkTreeNode, fCallback) {
-                oNetworkTreeNode.setIcon("scanning.svg");
-                var asIPAddressComponents = /((?:[0-9]{1,3}\.){3})([0-9]{1,3})/.exec(sOwnIPAddress),
-                    sFirstBytes = asIPAddressComponents[1],
-                    sLastByte = asIPAddressComponents[2];
-                uLastByte = -1;
-                function fScanAddressRange() {
-                  if (++uLastByte < 256) {
-                    var sIPAddress = sFirstBytes + uLastByte;
-                    if (sIPAddress == sOwnIPAddress) {
-                      oTreeNode = oNetworkTreeNode.appendChild(new cTreeNode(sIPAddress + " (you)", "machine.svg"));
-                      fScanAddressRange();
-                    } else {
-                      oTreeNode = oNetworkTreeNode.appendChild(new cTreeNode(sIPAddress, "scanning.svg"));
-                      fScanIPAddress(sFirstBytes + uLastByte, oTreeNode, fScanAddressRange);
-                    };
-                  } else {
-                    oNetworkTreeNode.setIcon("network.svg");
-                    fCallback();
-                  };
-                }
-                for (var uThreads = 16; uThreads--;) {
-                  setTimeout(fScanAddressRange);
-                };
-              };
-            };
+              return;
+            }
+            fScanNetworksForIPAddresses(asIPAddresses, function() {
+              document.title = "Done.";
+              clearInterval(oInterval);
+              document.body.appendChild(new cTreeNode("Scanning took " + fsGetTime() + ".", "info.svg").oRootElement);
+              // done scanning.
+            });
           },
           function fGetIPAddressErrorCallback(sErrorMessage) {
             document.body.appendChild(new cTreeNode(sErrorMessage, "error.svg").oRootElement);
           }
         );
       };
-      
-      function fScanIPAddress(sIPAddress, oMachineTreeNode, fCallback) {
-        oMachineTreeNode.setName(sIPAddress);
-        oMachineTreeNode.setIcon("scanning.svg");
-        fXHRScanIPAddressPorts(sIPAddress, [2, 3, 4, 5, 445], function(auDetectedPortNumbers) {
-          if (auDetectedPortNumbers.length >= 3) {
-            // *nix systems appear to have every port detected.
-            oMachineTreeNode.setIcon("nix.svg");
-          } else if (auDetectedPortNumbers.length == 1 && auDetectedPortNumbers[0] == 445) {
-            oMachineTreeNode.setIcon("windows.svg");
-          } else if (auDetectedPortNumbers.length != 0) {
-            oMachineTreeNode.setIcon("unknown.svg");
-          } else {
-            oMachineTreeNode.remove();
+      function fScanNetworksForIPAddresses(asIPAddresses, fCallback) {
+        (function fScanNetworksForIPAddressesLoop() {
+          if (asIPAddresses.length != 0) {
+            return fScanNetwork(asIPAddresses.shift(), fScanNetworksForIPAddressesLoop);
           };
           fCallback();
+        })();
+      };
+      function fScanNetwork(sIPAddress, fCallback) {
+        var oNetworkTreeNode = new cTreeNode("Determining subnet for " + sIPAddress + "...", "scanning.svg"),
+            uIPAddress = fuIPAddress(sIPAddress);
+        document.body.appendChild(oNetworkTreeNode.oRootElement);
+        fGetNetworkSubnetPrefixLength(uIPAddress, oNetworkTreeNode, function (uPrefixLength) {
+          oNetworkTreeNode.setName("Scanning network " + sIPAddress + "/" + uPrefixLength + "...")
+          var uBitMask = - (1 << (32 - uPrefixLength)),
+              uAllOnes = (1 << (32 - uPrefixLength)) - 1,
+              uStartIPAddress = uIPAddress & uBitMask,
+              uEndIPAddress = uIPAddress | uAllOnes,
+              uCurrentIPAddress = uStartIPAddress + 1,
+              uScansStarted = 0,
+              uScansFinished = 0;
+          function fScanIPAddressThread() {
+            uScansStarted++;
+            if (uCurrentIPAddress != uEndIPAddress) {
+              var sCurrentIPAddress = fsIPAddress(uCurrentIPAddress);
+              if (uCurrentIPAddress == uIPAddress) {
+                oTreeNode = oNetworkTreeNode.appendChild(new cTreeNode(sCurrentIPAddress + " (you)", "machine.svg"));
+                uCurrentIPAddress++;
+                fScanIPAddressThread(); // no need to scan self.
+              } else {
+                oTreeNode = oNetworkTreeNode.appendChild(new cTreeNode(sCurrentIPAddress, "scanning.svg"));
+                fScanIPAddress(uCurrentIPAddress++, oTreeNode, fScanIPAddressThread);
+              };
+              return;
+            };
+            oNetworkTreeNode.setName("Network " + sIPAddress + "/" + uPrefixLength)
+            oNetworkTreeNode.setIcon("network.svg")
+            uScansFinished++;
+            if (uScansStarted == uScansFinished) {
+              fCallback();
+            };
+          };
+          for (var uThreads = 64; uThreads--;) setTimeout(fScanIPAddressThread);
+        });
+      };
+      
+      function fGetNetworkSubnetPrefixLength(uIPAddress, oNetworkTreeNode, fCallback) {
+        // Attempting to make an XHR to the broadcast address will result in an immediate error. Attempting to make an
+        // XHR to an unused IP address will result in a time-out. We'll start with a large prefix and try increasingly
+        // smaller ones to look for potential broadcast addresses using this timing difference. An IP address can also
+        // be in-use by a *nix machine, which will also result in an immediate error. In an attempt to distinguish
+        // between these two, try the next smaller prefix as well: if that fails, assume the former prefix is right and
+        // return. Obviously this is not perfect, but it seems to work well enough.
+        var uPrefixLength = 26,
+            bBroadcastAddressMayHaveBeenFound = false,
+            oTreeNode = oNetworkTreeNode.appendChild(new cTreeNode("", "scanning.svg"));
+        (function fTestPrefixLength() {
+          if (uPrefixLength >= 16) {
+            var uAllOnes = (1 << (32 - uPrefixLength)) - 1,
+                sBroadcastIPAddress = fsIPAddress(uIPAddress | uAllOnes);
+            oTreeNode.setName("Testing potential broadcast address " + sBroadcastIPAddress + " (/" + uPrefixLength + ")...");
+            fXHRScanIPAddressPorts(sBroadcastIPAddress, [2], function(auDetectedPortNumbers) {
+              if (auDetectedPortNumbers.length > 0) {
+                // This IP address results in an immediate error. It may be the broadcast address.
+                if (uPrefixLength == 16) {
+                  // We won't try to scan larger networks: use this.
+                  oTreeNode.remove();
+                  return fCallback(uPrefixLength);
+                };
+                bBroadcastAddressMayHaveBeenFound = true;
+                // Try the next: in most setups this should fail if we just found the broadcast address.
+                uPrefixLength--;
+                return fTestPrefixLength();
+              };
+              if (!bBroadcastAddressMayHaveBeenFound) {
+                // This IP address is not used, nor was the previously tested one: try the next.
+                uPrefixLength--;
+                return fTestPrefixLength();
+              };
+              // This IP address is not used, so the previous one is probably the broadcast address.
+              oTreeNode.remove();
+              fCallback(uPrefixLength + 1);
+            });
+            return;
+          };
+          oTreeNode.setName("Could not determine subnet, assuming /24...");
+          oTreeNode.setIcon("error.svg");
+          fCallback(8);
+        })();
+      };
+      
+      function fScanIPAddress(uIPAddress, oMachineTreeNode, fCallback) {
+        var sIPAddress = fsIPAddress(uIPAddress);
+        oMachineTreeNode.setName(sIPAddress);
+        oMachineTreeNode.setIcon("scanning.svg");
+        // check if machine responds on the SMB/RDP ports, which both Windows and *nix machines might.
+        fXHRScanIPAddressPorts(sIPAddress, [80, 443, 445, 3389], function(auDetectedPortNumbers) {
+          // no response on this port: assume IP address not in use.
+          if (auDetectedPortNumbers.length == 0) {
+            oMachineTreeNode.remove();
+            return fCallback();
+          };
+          // check if machine responds to other ports that are very unlikely to be in use:
+          fXHRScanIPAddressPorts(sIPAddress, [2], function(auDetectedPortNumbers) {
+            if (auDetectedPortNumbers.length > 0) {
+              // machine responds to ports that are very unlikely to be in use: probably *nix.
+              oMachineTreeNode.setIcon("machine.svg");
+              return fCallback();
+            };
+            // check again as this is somewhat unreliable:
+            fXHRScanIPAddressPorts(sIPAddress, [3], function(auDetectedPortNumbers) {
+              if (auDetectedPortNumbers.length > 0) {
+                // machine responds to ports that are very unlikely to be in use: probably *nix.
+                oMachineTreeNode.setIcon("machine.svg");
+              } else {
+                // machine does not appear to respond to ports that are not in use: probably Windows.
+                oMachineTreeNode.setIcon("windows.svg");
+              };
+              fCallback();
+            });
+          });
         });
       };
       function cTreeNode(sNodeName, sIconURL) {
